@@ -1,0 +1,53 @@
+{
+    "name": "dzentota/config-loader",
+    "description": "Secure environment variable and configuration loader that parses values into TypedValue objects",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Alex Tatulchenkov",
+            "email": "alex@tatulchenkov.com"
+        }
+    ],
+    "keywords": [
+        "config",
+        "environment",
+        "variables",
+        "security",
+        "typed",
+        "valueobjects",
+        "appsec",
+        "configuration",
+        "php"
+    ],
+    "require": {
+        "php": ">=7.4",
+        "dzentota/typedvalue": "dev-master",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5",
+        "vimeo/psalm": "^4.0",
+        "phpstan/phpstan": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "dzentota\\ConfigLoader\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "dzentota\\ConfigLoader\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "psalm": "psalm",
+        "phpstan": "phpstan analyse"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+} 
