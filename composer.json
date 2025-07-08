@@ -21,7 +21,7 @@
         "php"
     ],
     "require": {
-        "php": ">=7.4",
+        "php": ">=8.2",
         "dzentota/typedvalue": "dev-master",
         "ext-json": "*"
     },
