@@ -11,11 +11,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+use dzentota\ConfigLoader\ConfigLoader;
 use dzentota\ConfigLoader\ConfigLoaderFactory;
-use dzentota\ConfigLoader\TypedValue\Port;
-use dzentota\ConfigLoader\TypedValue\ServiceUrl;
-use dzentota\ConfigLoader\TypedValue\DatabaseDsn;
-use dzentota\ConfigLoader\TypedValue\FeatureFlag;
+use DomainPrimitives\Network\Port;
+use DomainPrimitives\Network\ServiceUrl;
+use DomainPrimitives\Database\DatabaseDsn;
+use DomainPrimitives\Configuration\FeatureFlag;
 use dzentota\ConfigLoader\Exception\ConfigLoaderException;
 
 /**
@@ -65,96 +66,63 @@ class ApiKey implements Typed
  */
 class AppConfig
 {
-    public function __construct(
-        public readonly Port $port,
-        public readonly DatabaseDsn $database,
-        public readonly ServiceUrl $apiUrl,
-        public readonly ApiKey $stripeKey,
-        public readonly FeatureFlag $debugMode,
-        public readonly FeatureFlag $maintenance
-    ) {}
+    private ConfigLoader $configLoader;
 
-    public function isProduction(): bool
+    public function __construct(ConfigLoader $configLoader)
     {
-        return !$this->debugMode->isEnabled() && $this->stripeKey->isLive();
+        $this->configLoader = $configLoader;
     }
-}
 
-/**
- * Application Bootstrap
- */
-function bootstrapApplication(): AppConfig
-{
-    try {
-        // Define secure defaults
-        $defaults = [
-            'port' => '8080',
-            'debug' => 'false',
-            'maintenance' => 'false',
-            'DATABASE_DSN' => 'sqlite::memory:',
-            'API_URL' => 'https://api.localhost:8080',
-            'STRIPE_SECRET_KEY' => 'sk_test_default123456789012345678901234567890',
-            'API_TIMEOUT' => '30'
+    /**
+     * Get server configuration
+     */
+    public function getServerConfig(): array
+    {
+        return [
+            'port' => $this->configLoader->get('port', Port::class),
+            'host' => $this->configLoader->getRaw('host', 'localhost'),
+            'debug' => $this->configLoader->get('debug', FeatureFlag::class),
         ];
+    }
 
-        // Create loader with layered configuration
-        // Priority: Environment > Config File > Defaults
-        $loader = ConfigLoaderFactory::createLayered(
-            $defaults,
-            '/etc/myapp/config.json',  // Production config
-            'MYAPP_',                  // Environment prefix
-            true,                      // Strict mode
-            false                      // Config file optional
-        );
+    /**
+     * Get database configuration
+     */
+    public function getDatabaseConfig(): array
+    {
+        return [
+            'dsn' => $this->configLoader->get('database_dsn', DatabaseDsn::class),
+            'pool_size' => $this->configLoader->getRaw('db_pool_size', 10),
+        ];
+    }
 
-        // Load and validate all configuration at startup
-        // Following AppSec Manifesto Rule #2: Parse, don't validate
-        $config = new AppConfig(
-            port: $loader->get('port', Port::class),
-            database: $loader->get('DATABASE_DSN', DatabaseDsn::class),
-            apiUrl: $loader->get('API_URL', ServiceUrl::class),
-            stripeKey: $loader->get('STRIPE_SECRET_KEY', ApiKey::class),
-            debugMode: $loader->get('debug', FeatureFlag::class),
-            maintenance: $loader->get('maintenance', FeatureFlag::class)
-        );
+    /**
+     * Get external services configuration
+     */
+    public function getServicesConfig(): array
+    {
+        return [
+            'api_url' => $this->configLoader->get('api_url', ServiceUrl::class),
+            'webhook_url' => $this->configLoader->get('webhook_url', ServiceUrl::class),
+            'stripe_key' => $this->configLoader->get('stripe_key', ApiKey::class),
+        ];
+    }
 
-        // Security validation for production
-        if ($config->isProduction()) {
-            // Ensure secure settings in production
-            if ($config->port->toInt() < 1024 && !$config->debugMode->isEnabled()) {
-                throw new ConfigLoaderException(
-                    'Production applications should not run on privileged ports without explicit debug mode'
-                );
-            }
-
-            if (!$config->apiUrl->isSecure()) {
-                throw new ConfigLoaderException(
-                    'Production API URL must use HTTPS'
-                );
-            }
-
-            if ($config->database->getHost() === 'localhost' && !$config->debugMode->isEnabled()) {
-                echo "WARNING: Using localhost database in production mode\n";
-            }
-        }
-
-        return $config;
-
-    } catch (ConfigLoaderException $e) {
-        // Following AppSec Manifesto Rule #8: The Vigilant Eye
-        error_log("Configuration error: " . $e->getMessage());
-        
-        // In production, exit on configuration errors
-        if (!isset($_ENV['MYAPP_DEBUG']) || $_ENV['MYAPP_DEBUG'] !== 'true') {
-            exit(1);
-        }
-        
-        throw $e;
+    /**
+     * Get feature flags
+     */
+    public function getFeatureFlags(): array
+    {
+        return [
+            'maintenance_mode' => $this->configLoader->get('maintenance_mode', FeatureFlag::class),
+            'new_dashboard' => $this->configLoader->get('new_dashboard', FeatureFlag::class),
+            'email_notifications' => $this->configLoader->get('email_notifications', FeatureFlag::class),
+        ];
     }
 }
 
 /**
- * Simple Web Application
+ * Web Application Bootstrap
  */
 class WebApplication
 {
@@ -165,60 +133,87 @@ class WebApplication
         $this->config = $config;
     }
 
+    /**
+     * Initialize and run the web application
+     */
     public function run(): void
     {
-        if ($this->config->maintenance->isEnabled()) {
-            $this->showMaintenancePage();
-            return;
+        try {
+            $this->validateConfiguration();
+            $this->startServer();
+        } catch (ConfigLoaderException $e) {
+            error_log("Configuration error: " . $e->getMessage());
+            exit(1);
         }
+    }
 
-        echo "Starting web server on port " . $this->config->port->toInt() . "\n";
-        echo "Database: " . $this->config->database->getDriver() . "\n";
-        echo "API URL: " . $this->config->apiUrl->toNative() . "\n";
-        echo "Debug mode: " . ($this->config->debugMode->isEnabled() ? 'ON' : 'OFF') . "\n";
-        echo "Environment: " . ($this->config->isProduction() ? 'PRODUCTION' : 'DEVELOPMENT') . "\n";
+    /**
+     * Validate all configuration at startup
+     */
+    private function validateConfiguration(): void
+    {
+        $serverConfig = $this->config->getServerConfig();
+        $dbConfig = $this->config->getDatabaseConfig();
+        $servicesConfig = $this->config->getServicesConfig();
 
-        if ($this->config->debugMode->isEnabled()) {
-            $this->showDebugInfo();
+        echo "✓ Server will run on port: " . $serverConfig['port']->toInt() . "\n";
+        echo "✓ Database: " . $dbConfig['dsn']->getDriver() . "\n";
+        echo "✓ API URL: " . $servicesConfig['api_url']->getHost() . "\n";
+        echo "✓ Stripe environment: " . 
+            ($servicesConfig['stripe_key']->isSandbox() ? 'sandbox' : 'live') . "\n";
+    }
+
+    /**
+     * Start the server (mock implementation)
+     */
+    private function startServer(): void
+    {
+        $serverConfig = $this->config->getServerConfig();
+        
+        echo "Starting server on port " . $serverConfig['port']->toInt() . "...\n";
+        
+        if ($serverConfig['debug']->isEnabled()) {
+            echo "Debug mode enabled\n";
         }
-
-        // Start your web server here...
+        
         echo "Application started successfully!\n";
-    }
-
-    private function showMaintenancePage(): void
-    {
-        echo "Application is in maintenance mode. Please try again later.\n";
-    }
-
-    private function showDebugInfo(): void
-    {
-        echo "\n=== DEBUG INFO ===\n";
-        echo "Stripe Key Type: " . ($this->config->stripeKey->isSandbox() ? 'SANDBOX' : 'LIVE') . "\n";
-        echo "Database Host: " . ($this->config->database->getHost() ?? 'N/A') . "\n";
-        echo "API Secure: " . ($this->config->apiUrl->isSecure() ? 'YES' : 'NO') . "\n";
-        echo "=================\n\n";
     }
 }
 
-// Example usage
-if (basename(__FILE__) === basename($_SERVER['SCRIPT_NAME'])) {
-    echo "Web Application Configuration Example\n";
-    echo "=====================================\n\n";
+/**
+ * Example usage
+ */
+try {
+    // Create configuration loader with defaults, JSON file, and environment variables
+    $configLoader = ConfigLoaderFactory::createLayered(
+        [
+            // Secure defaults
+            'port' => '8080',
+            'host' => 'localhost',
+            'debug' => 'false',
+            'database_dsn' => 'sqlite::memory:',
+            'api_url' => 'https://api.example.com',
+            'webhook_url' => 'https://webhooks.example.com',
+            'stripe_key' => 'sk_test_' . str_repeat('a', 32),
+            'maintenance_mode' => 'false',
+            'new_dashboard' => 'false',
+            'email_notifications' => 'true',
+            'db_pool_size' => '10'
+        ],
+        '/etc/myapp/config.json',   // Production config file (optional)
+        'MYAPP_',                   // Environment variable prefix
+        true,                       // Strict mode
+        false                       // Config file not required
+    );
 
-    // Set some example environment variables (comment out to test real env vars)
-    if (getenv('MYAPP_PORT') === false) $_ENV['MYAPP_PORT'] = '3000';
-    if (getenv('MYAPP_DEBUG') === false) $_ENV['MYAPP_DEBUG'] = 'true';
-    if (getenv('MYAPP_API_URL') === false) $_ENV['MYAPP_API_URL'] = 'https://api.example.com/v1';
-    if (getenv('MYAPP_STRIPE_SECRET_KEY') === false) $_ENV['MYAPP_STRIPE_SECRET_KEY'] = 'sk_test_abcdefghijklmnopqrstuvwxyz1234567890';
-    if (getenv('MYAPP_DATABASE_DSN') === false) $_ENV['MYAPP_DATABASE_DSN'] = 'mysql:host=localhost;dbname=myapp;port=3306';
+    // Create application configuration
+    $appConfig = new AppConfig($configLoader);
 
-    try {
-        $config = bootstrapApplication();
-        $app = new WebApplication($config);
-        $app->run();
-    } catch (Exception $e) {
-        echo "Fatal error: " . $e->getMessage() . "\n";
-        exit(1);
-    }
+    // Create and run the web application
+    $webApp = new WebApplication($appConfig);
+    $webApp->run();
+
+} catch (ConfigLoaderException $e) {
+    echo "Fatal configuration error: " . $e->getMessage() . "\n";
+    exit(1);
 } 

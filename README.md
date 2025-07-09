@@ -35,8 +35,8 @@ composer require dzentota/config-loader
 
 ```php
 use dzentota\ConfigLoader\ConfigLoaderFactory;
-use dzentota\ConfigLoader\TypedValue\Port;
-use dzentota\ConfigLoader\TypedValue\ServiceUrl;
+use DomainPrimitives\Network\Port;
+use DomainPrimitives\Network\ServiceUrl;
 
 // Create loader that reads environment variables with APP_ prefix
 $loader = ConfigLoaderFactory::createFromEnvironment('APP_');
@@ -54,8 +54,8 @@ echo $apiUrl->getHost(); // api.example.com
 
 ```php
 use dzentota\ConfigLoader\ConfigLoaderFactory;
-use dzentota\ConfigLoader\TypedValue\DatabaseDsn;
-use dzentota\ConfigLoader\TypedValue\FeatureFlag;
+use DomainPrimitives\Database\DatabaseDsn;
+use DomainPrimitives\Configuration\FeatureFlag;
 
 // Create loader: JSON file + environment variables (env takes priority)
 $loader = ConfigLoaderFactory::createFromJsonAndEnv(
@@ -336,7 +336,9 @@ if ($loader->isValid('port', Port::class)) {
 
 ```php
 use dzentota\ConfigLoader\ConfigLoaderFactory;
-use dzentota\ConfigLoader\TypedValue\{Port, ServiceUrl, DatabaseDsn, FeatureFlag};
+use DomainPrimitives\Network\{Port, ServiceUrl};
+use DomainPrimitives\Database\DatabaseDsn;
+use DomainPrimitives\Configuration\FeatureFlag;
 
 // Production-ready configuration loading
 $loader = ConfigLoaderFactory::createLayered(

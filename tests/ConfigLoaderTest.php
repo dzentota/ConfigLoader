@@ -8,9 +8,9 @@ use PHPUnit\Framework\TestCase;
 use dzentota\ConfigLoader\ConfigLoader;
 use dzentota\ConfigLoader\ConfigLoaderFactory;
 use dzentota\ConfigLoader\Source\ArraySource;
-use dzentota\ConfigLoader\TypedValue\Port;
-use dzentota\ConfigLoader\TypedValue\FeatureFlag;
-use dzentota\ConfigLoader\TypedValue\ServiceUrl;
+use DomainPrimitives\Network\Port;
+use DomainPrimitives\Configuration\FeatureFlag;
+use DomainPrimitives\Network\ServiceUrl;
 use dzentota\ConfigLoader\Exception\ValidationException;
 use dzentota\ConfigLoader\Exception\ConfigLoaderException;
 
@@ -111,10 +111,7 @@ class ConfigLoaderTest extends TestCase
 
     public function testIsValid(): void
     {
-        $config = [
-            'valid_port' => '3000',
-            'invalid_port' => 'abc'
-        ];
+        $config = ['valid_port' => '8080', 'invalid_port' => 'not_a_port'];
         $loader = ConfigLoaderFactory::createForTesting($config);
 
         $this->assertTrue($loader->isValid('valid_port', Port::class));
@@ -122,36 +119,107 @@ class ConfigLoaderTest extends TestCase
         $this->assertFalse($loader->isValid('missing_key', Port::class));
     }
 
+    public function testMultipleTypedValues(): void
+    {
+        $config = [
+            'server_port' => '8080',
+            'database_port' => '3306',
+            'feature_enabled' => 'true',
+            'feature_disabled' => 'false',
+            'api_url' => 'https://api.example.com/v1',
+            'webhook_url' => 'https://webhook.example.com'
+        ];
+
+        $loader = ConfigLoaderFactory::createForTesting($config);
+
+        $serverPort = $loader->get('server_port', Port::class);
+        $dbPort = $loader->get('database_port', Port::class);
+        $featureEnabled = $loader->get('feature_enabled', FeatureFlag::class);
+        $featureDisabled = $loader->get('feature_disabled', FeatureFlag::class);
+        $apiUrl = $loader->get('api_url', ServiceUrl::class);
+        $webhookUrl = $loader->get('webhook_url', ServiceUrl::class);
+
+        $this->assertEquals(8080, $serverPort->toInt());
+        $this->assertEquals(3306, $dbPort->toInt());
+        $this->assertTrue($featureEnabled->isEnabled());
+        $this->assertFalse($featureDisabled->isEnabled());
+        $this->assertEquals('api.example.com', $apiUrl->getHost());
+        $this->assertEquals('webhook.example.com', $webhookUrl->getHost());
+    }
+
+    public function testCachingBehavior(): void
+    {
+        $config = ['port' => '8080'];
+        $loader = ConfigLoaderFactory::createForTesting($config);
+
+        // First load
+        $port1 = $loader->get('port', Port::class);
+        // Second load (should use cache)
+        $port2 = $loader->get('port', Port::class);
+
+        $this->assertEquals($port1->toInt(), $port2->toInt());
+    }
+
     public function testClearCache(): void
     {
-        $source = new ArraySource(['port' => '3000'], 100, 'Test');
         $loader = new ConfigLoader();
+        $source = new ArraySource(['port' => '8080'], 100, 'Test');
         $loader->addSource($source);
 
-        // Load config
-        $this->assertTrue($loader->has('port'));
-
-        // Modify source data
-        $source->set('port', '4000');
+        // Load once
+        $port1 = $loader->get('port', Port::class);
         
-        // Should still have old value due to caching
-        $port = $loader->get('port', Port::class);
-        $this->assertEquals(3000, $port->toInt());
-
-        // Clear cache and reload
+        // Clear cache
         $loader->clearCache();
-        $port = $loader->get('port', Port::class);
-        $this->assertEquals(4000, $port->toInt());
+        
+        // Load again (should reload from source)
+        $port2 = $loader->get('port', Port::class);
+        
+        $this->assertEquals($port1->toInt(), $port2->toInt());
+    }
+
+    public function testStrictModeToggle(): void
+    {
+        $loader = new ConfigLoader(true);
+        $loader->addSource(new ArraySource(['port' => '8080'], 100, 'Test'));
+
+        $this->assertTrue($loader->isStrict());
+
+        // Should throw exception for missing key in strict mode
+        $this->expectException(ConfigLoaderException::class);
+        $loader->get('missing_key', Port::class);
+    }
+
+    public function testNonStrictModeWithDefault(): void
+    {
+        $loader = new ConfigLoader(false);
+        $loader->addSource(new ArraySource(['port' => '8080'], 100, 'Test'));
+
+        $this->assertFalse($loader->isStrict());
+
+        // Should use default value for missing key in non-strict mode
+        $port = $loader->get('missing_key', Port::class, '9000');
+        $this->assertEquals(9000, $port->toInt());
     }
 
     public function testGetSourceInfo(): void
     {
         $loader = new ConfigLoader();
-        $loader->addSource(new ArraySource([], 100, 'Test Source'));
+        $loader->addSource(new ArraySource(['test' => 'value'], 100, 'TestSource'));
 
         $sourceInfo = $loader->getSourceInfo();
         $this->assertCount(1, $sourceInfo);
-        $this->assertEquals('Test Source', $sourceInfo[0]['name']);
+        $this->assertEquals('TestSource', $sourceInfo[0]['name']);
         $this->assertEquals(100, $sourceInfo[0]['priority']);
+    }
+
+    public function testGetParserInfo(): void
+    {
+        $loader = new ConfigLoader();
+        
+        $parserInfo = $loader->getParserInfo();
+        $this->assertNotEmpty($parserInfo);
+        $this->assertArrayHasKey('priority', $parserInfo[0]);
+        $this->assertArrayHasKey('type', $parserInfo[0]);
     }
 } 

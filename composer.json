@@ -22,7 +22,7 @@
     ],
     "require": {
         "php": ">=8.2",
-        "dzentota/typedvalue": "dev-master",
+        "dzentota/domain-primitives": "dev-main",
         "ext-json": "*"
     },
     "require-dev": {
